@@ -14,35 +14,22 @@ from utils.mtcnn import TrtMtcnn
 from threading import Thread
 from djitellopy import Tello
 
+# global vars
 currentFrame = False
 keepRecording = True
 video_fps = 15
 low_bat = 15
-winname = "Tello"
 
 # max velocity settings
 max_yaw_velocity = 50
 max_up_down_velocity = 40
 max_forward_backward_velocity = 40
 
-net = jetson.inference.detectNet("ssd-mobilenet-v2", threshold=0.5)
-
-tello = Tello()
-tello.connect()
-
-battery = tello.get_battery()
-print ("Battery: ", tello.get_battery());
-
-if battery < low_bat:
-    print ("Battery low")
-    exit()
-
 def limitVelocity(velocity, max_velocity):
     return min(max_velocity, max(-max_velocity, velocity))
 
-
 def videoRecorder():
-    global currentFrame
+    global frame_read, currentFrame
     now = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
     height, width, _ = frame_read.frame.shape
     video = cv2.VideoWriter('video/video-' + now + '.avi', cv2.VideoWriter_fourcc(*'XVID'), video_fps, (width, height))
@@ -55,19 +42,19 @@ def videoRecorder():
         elapsed = end - start
         time.sleep(max(0,1 / video_fps - elapsed))
         end = time.time();
-        # print("Record Video: {:0>1.0f} FPS".format(1 / (end - start)));
-
     video.release()
 
 def dist(p1,p2):
     return math.sqrt( ((p1[0]-p2[0])**2)+((p1[1]-p2[1])**2) )
 
 def detectionDistance(detectionElem):
+    global detection
     if detection == False:
         return 0
     return dist(detectionElem.Center,detection.Center)
 
 def getDetectedPerson(detections, lastDetection):
+    global net
     persons = []
     for detection in detections:
         className = net.GetClassDesc(detection.ClassID)
@@ -78,21 +65,37 @@ def getDetectedPerson(detections, lastDetection):
         return persons[0]
     return False
 
-tello.streamon()
-frame_read = tello.get_frame_read()
+def main():
+    global net, detection, frame_read, currentFrame, keepRecording, low_bat, max_yaw_velocity, max_up_down_velocity, max_forward_backward_velocity;
 
-recorder = Thread(target=videoRecorder)
-recorder.start()
+    # Init model
+    net = jetson.inference.detectNet("ssd-mobilenet-v2", threshold=0.5)
 
-tello.send_rc_control(0, 0, 0, 0)
-tello.takeoff()
-tello.move_up(50)
+    tello = Tello()
+    tello.connect()
 
-try:
+    battery = tello.get_battery()
+    print ("Battery: ", tello.get_battery());
+
+    if battery < low_bat:
+        print ("Battery low")
+        exit()
+
+    tello.streamon()
+    frame_read = tello.get_frame_read()
+    currentFrame = frame_read.frame
+
+    recorder = Thread(target=videoRecorder)
+    recorder.start()
+
+    tello.send_rc_control(0, 0, 0, 0)
+    tello.takeoff()
+    tello.move_up(50)
+
+    winname = "Tello"
     running = True
     detection = False
     while running:
-        start = time.time()
         battery = tello.get_battery();
         if battery < low_bat:
             print ("Battery low")
@@ -117,18 +120,11 @@ try:
                 yaw_velocity = int((detectX - centerX) / 7) # proportional only 
                 up_down_velocity = int ((30 - detection.Top) / 2)
                 forward_backward_velocity = int((h - detection.Bottom - 30) / 2) 
-
-                # yaw_velocity = min(40, max(-40, yaw_velocity)) 
-                # up_down_velocity = min(20, max(-20, up_down_velocity)) 
-                # forward_backward_velocity = min(20, max(-20, forward_backward_velocity)) 
                 yaw_velocity = limitVelocity(yaw_velocity, max_yaw_velocity)
                 up_down_velocity = limitVelocity(up_down_velocity, max_up_down_velocity) 
                 forward_backward_velocity = limitVelocity(forward_backward_velocity, max_forward_backward_velocity)
                 left_right_velocity = 0
-                # TODO left_right_velocity = 20
-
                 print (w,h,detection.Top, detection.Bottom, forward_backward_velocity, up_down_velocity)
-                print (centerX, yaw_velocity)
 
             else:
                 print ("No Person detected")
@@ -136,9 +132,6 @@ try:
             print ("No detection")
 
         tello.send_rc_control(left_right_velocity, forward_backward_velocity, up_down_velocity, yaw_velocity)
-
-        # Measure Time and show window
-        end = time.time()
 
         # scale image
         scale_percent = 50 # percent of original size
@@ -155,24 +148,14 @@ try:
         if keyCode == 27:
             break
 
-except: # catch *all* exceptions
-    print ("Exception")
-    # TODO remove
-    var = traceback.format_exc()
-    print (var)
-    e = sys.exc_info()[0]
-    print("Error", e)
+    cv2.destroyAllWindows()
+    tello.send_rc_control(0, 0, 0, 0)
+    battery = tello.get_battery()
+    tello.land()
+    recorder.join()
+    keepRecording = False
 
-cv2.destroyAllWindows()
-
-print("Land")
-
-keepRecording = False
-recorder.join()
-
-tello.send_rc_control(0, 0, 0, 0)
-battery = tello.get_battery()
-print ("Battery: ", tello.get_battery());
-tello.land()
-
+if __name__ == "__main__":
+    # execute only if run as a script
+    main()
 
