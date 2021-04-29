@@ -45,7 +45,7 @@ def videoRecorder():
     global currentFrame
     now = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
     height, width, _ = frame_read.frame.shape
-    video = cv2.VideoWriter('../video/video-' + now + '.avi', cv2.VideoWriter_fourcc(*'XVID'), video_fps, (width, height))
+    video = cv2.VideoWriter('video/video-' + now + '.avi', cv2.VideoWriter_fourcc(*'XVID'), video_fps, (width, height))
 
     while keepRecording:
         start = time.time()
