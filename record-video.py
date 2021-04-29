@@ -19,6 +19,7 @@ def videoRecorder():
     while keepRecording:
         video.write(frame_read.frame)
         time.sleep(1 / 30)
+        print (".")
 
     video.release()
 
@@ -32,5 +33,6 @@ recorder.start()
 # tello.rotate_counter_clockwise(360)
 # tello.land()
 
+time.sleep(10)
 keepRecording = False
 recorder.join()
