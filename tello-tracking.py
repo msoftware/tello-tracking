@@ -14,13 +14,16 @@ from utils.mtcnn import TrtMtcnn
 from threading import Thread
 from djitellopy import Tello
 
-# global vars
-currentFrame = False
-keepRecording = True
+# Video recoding frame rate (Max 15 on Jetson Nano)
 video_fps = 15
+
+# Land if battery is below percentage
 low_bat = 15
 
-# max velocity settings
+# Enable video recoder
+enableVideoRecoder = True
+
+# Max velocity settings (Keep in mind the delay!)
 max_yaw_velocity = 50
 max_up_down_velocity = 40
 max_forward_backward_velocity = 40
@@ -29,7 +32,7 @@ def limitVelocity(velocity, max_velocity):
     return min(max_velocity, max(-max_velocity, velocity))
 
 def videoRecorder():
-    global frame_read, currentFrame
+    global frame_read
     now = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
     height, width, _ = frame_read.frame.shape
     video = cv2.VideoWriter('video/video-' + now + '.avi', cv2.VideoWriter_fourcc(*'XVID'), video_fps, (width, height))
@@ -66,7 +69,10 @@ def getDetectedPerson(detections, lastDetection):
     return False
 
 def main():
-    global net, detection, frame_read, currentFrame, keepRecording, low_bat, max_yaw_velocity, max_up_down_velocity, max_forward_backward_velocity;
+    global net, detection, frame_read, keepRecording, low_bat, max_yaw_velocity, max_up_down_velocity, max_forward_backward_velocity;
+
+    currentFrame = False
+    keepRecording = True
 
     # Init model
     net = jetson.inference.detectNet("ssd-mobilenet-v2", threshold=0.5)
@@ -85,8 +91,9 @@ def main():
     frame_read = tello.get_frame_read()
     currentFrame = frame_read.frame
 
-    recorder = Thread(target=videoRecorder)
-    recorder.start()
+    if enableVideoRecoder:
+        recorder = Thread(target=videoRecorder)
+        recorder.start()
 
     tello.send_rc_control(0, 0, 0, 0)
     tello.takeoff()
@@ -96,11 +103,13 @@ def main():
     running = True
     detection = False
     while running:
+
         battery = tello.get_battery();
         if battery < low_bat:
             print ("Battery low")
             running = False
 
+        currentFrame = frame_read.frame
         cuda_img = jetson.utils.cudaFromNumpy(currentFrame, isBGR=False)
         detections = net.Detect(cuda_img, overlay='none')
         np_img = jetson.utils.cudaToNumpy(cuda_img)
@@ -131,15 +140,17 @@ def main():
         else:
             print ("No detection")
 
+        # Tello remote control by object detection 
         tello.send_rc_control(left_right_velocity, forward_backward_velocity, up_down_velocity, yaw_velocity)
 
-        # scale image
+        # scale image for small screen
         scale_percent = 50 # percent of original size
         width = int(np_img.shape[1] * scale_percent / 100)
         height = int(np_img.shape[0] * scale_percent / 100)
         dim = (width, height)
         resized = cv2.resize(np_img, dim, interpolation = cv2.INTER_AREA)
 
+        # Show image on screen (Needs running X-Server!)
         cv2.namedWindow(winname)    
         cv2.moveWindow(winname, 0,0)
         cv2.imshow(winname,resized)
@@ -148,14 +159,16 @@ def main():
         if keyCode == 27:
             break
 
+    # Goodby
     cv2.destroyAllWindows()
     tello.send_rc_control(0, 0, 0, 0)
     battery = tello.get_battery()
     tello.land()
-    recorder.join()
-    keepRecording = False
+    if enableVideoRecoder:
+        recorder.join()
+        keepRecording = False
 
 if __name__ == "__main__":
-    # execute only if run as a script
+    # Execute if run as a script
     main()
 
